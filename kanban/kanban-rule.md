@@ -692,9 +692,9 @@ Objectiveの見直しが必要な場合：
 ## Epic_Planner
 入力: Epicカード
 出力: 
-  - 実現方法を検討し、上流設計を行い、結果をEpicカードへ反映する
+  - 実現方法を検討し、上流設計を行い、結果をObjectiveカードへ落とし込んでいく
   - Objectiveカードを作成する
-  - **Epicレビューカードを作成する（Epic自体をレビューするカード、タイトル: `[Review][Epic] Epic名`）**
+  - **Epicレビューカードを作成する（「Epicとその配下のObjectiveカード」をレビューするカード、タイトル: `[Review][Epic] Epic名`）**
   
 実装は行わない
 
@@ -702,12 +702,12 @@ Objectiveの見直しが必要な場合：
 ## Objective_Planner
 入力: Objectiveカード
 出力: 
-  - 実現方法を検討し、詳細設計を行い、結果をObjectiveカードへ反映する
+  - 実現方法を検討し、詳細設計を行い、結果をSpecカードへ落とし込んでいく
   - **Specカードを複数作成する**
     - 1つのObjectiveから通常4-12個のSpec
     - 各Specは1つの層（Domain/Data/API/UI等）に集中
     - **異なる層や責務は必ず別々のSpecとして作成**
-  - **Objectiveレビューカードを作成する（Objective自体をレビューするカード、タイトル: `[Review][Objective] Objective名`）**
+  - **Objectiveレビューカードを作成する（「Objectiveとその配下のSpecカード」をレビューするカード、タイトル: `[Review][Objective] Objective名`）**
   
 実装は行わない
 
