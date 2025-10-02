@@ -120,6 +120,24 @@ Epic -> Objective -> Spec(MRC) -> Micro(LM)
 - タイトル: [Objective] Objectiveの内容
 - OUTPUT Specカードを作成する
 
+### Objective記述の抽象度ルール
+
+#### 「概念レベル」とは
+以下の要素のみを記述し、具体的な実装コードは含めない：
+- **種類の列挙**: どんなエンティティ/値オブジェクトがあるか
+- **責務の説明**: 各要素が何をするか
+- **関係性の整理**: エンティティ間の関連
+- **制約のテーブル化**: ビジネスルールの一覧
+
+#### 「技術詳細」とは（Specで扱う）
+以下は**絶対にObjectiveに書かない**：
+- ❌ プログラミング言語のコード（Rust, TypeScript, SQL等）
+- ❌ 具体的なメソッドシグネチャ（引数・戻り値の型定義）
+- ❌ SQL文（CREATE TABLE, ALTER TABLE等）
+- ❌ UIコンポーネントの具体的な実装コード
+- ❌ enum/struct/classの完全な定義
+- ❌ 具体的なフィールド型（`Option<T>`, `Vec<T>`, `String`等）
+
 ### 含む内容
 1. **ゴールと背景**（何を実現したいか、なぜ必要か）
 
@@ -235,6 +253,36 @@ Objectiveは**「何を」**に集中し、**「どのように」**はSpecに�
 - バリデーションロジックの詳細（循環参照検証のアルゴリズム）
 - ドメインサービスのメソッドシグネチャ
 
+### Objective作成時のセルフチェックリスト
+
+作成後、以下を確認してください：
+
+#### ❌ これらが含まれていたら詳細すぎ（要修正）
+- [ ] プログラミング言語のコード（Rust, TypeScript, SQL, JSX等）
+- [ ] `pub`, `fn`, `impl`, `class`, `function` などのキーワード
+- [ ] 具体的な型定義（`String`, `Option<T>`, `Vec<T>`, `number`, `boolean`等）
+- [ ] メソッドの引数と戻り値の型（`fn method(&self) -> Result<T, E>`等）
+- [ ] CREATE TABLE文やALTER TABLE文
+- [ ] 具体的なReactコンポーネントのJSX/TSXコード
+- [ ] `#[derive(...)]`, `@Component`, `interface` などのアノテーション
+- [ ] import文やuse文
+
+#### ✅ これらが含まれていればOK
+- [ ] 「〜を表現する」「〜を判定する」「〜を検証する」などの振る舞いの説明
+- [ ] 制約を整理したテーブル（親子関係の組み合わせ表等）
+- [ ] エンティティ間の関係図（言葉で記述）
+- [ ] 「何を」「なぜ」に答える記述
+- [ ] 「（詳細は〇〇層Specで記述）」という注記
+- [ ] ビジネスルールの箇条書き
+
+#### ✅ 必須項目
+- [ ] ゴールと背景が明記されている
+- [ ] 想定されるSpec（作成予定）が4-12個列挙されている
+- [ ] 依存関係（前提条件・ブロック対象）が明記されている
+- [ ] 命名規則マスター表への参照がある（該当する場合）
+- [ ] スコープ外が明記されている
+- [ ] 成功指標が明記されている
+
 ### 分量の目安
 - 全体で1,000-1,500文字（技術詳細を削減した結果）
 - 読了時間2-3分
@@ -248,7 +296,7 @@ Objectiveは**「何を」**に集中し、**「どのように」**はSpecに�
 
 ### エンティティ拡張
 既存のTaskエンティティに階層情報を追加：
-- TaskLevel値オブジェクト: 5種類のレベル（Epic/Objective/Spec/Micro/Review）
+- TaskLevel値オブジェクト: 7種類のレベル（Epic/Objective/Spec/Micro/EpicReview/ObjectiveReview/SpecReview）
 - 親子関係: 親タスクへの参照
 - レビュー対象関係: レビュー対象タスクへの参照
 
@@ -266,7 +314,40 @@ Objectiveは**「何を」**に集中し、**「どのように」**はSpecに�
 （具体的な検証ロジック、enum定義はドメイン層Specで）
 ```
 
-**❌ 悪いObjective（詳細すぎ）:**
+**❌ 悪いObjective（詳細すぎ - プログラミング言語のコードを含む）:**
+
+```markdown
+## ドメイン型定義
+
+```rust
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub enum TaskLevel {
+    Epic,
+    Objective,
+    Spec,
+    Micro,
+    EpicReview,
+    ObjectiveReview,
+    SpecReview,
+}
+
+impl TaskLevel {
+    pub fn allowed_parent_levels(&self) -> Vec<TaskLevel> {
+        match self {
+            TaskLevel::Epic => vec![],
+            TaskLevel::Objective => vec![TaskLevel::Epic],
+            // ...
+        }
+    }
+}
+```
+```
+
+**理由:** これはドメイン層Specで扱うべき実装コード。Objectiveでは「7種類のレベルを表現」「許可される親レベルの判定機能」と概念で記述すべき。
+
+---
+
+**❌ 悪いObjective（詳細すぎ - SQLコードを含む）:**
 
 ```markdown
 ## tasksテーブル拡張
@@ -278,20 +359,28 @@ ALTER TABLE tasks ADD CONSTRAINT fk_parent
   FOREIGN KEY (parent_task_id) REFERENCES tasks(id) ON DELETE SET NULL;
 CREATE INDEX idx_parent_task_id ON tasks(parent_task_id);
 ```
+```
 
-## Rust型定義
+**理由:** これはデータ層Specで扱うべきSQL。Objectiveでは「task_level列とparent_task_id列を追加」「親タスクへの外部キー参照」と概念で記述すべき。
 
-```rust
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum TaskLevel {
-    Epic,
-    Objective,
-    Spec,
-    Micro,
-}
+---
+
+**❌ 悪いObjective（詳細すぎ - UIコンポーネントコードを含む）:**
+
+```markdown
+## タスク作成フォーム
+
+```tsx
+<Select value={taskLevel} onChange={(e) => setTaskLevel(e.target.value)}>
+  <option value="epic">Epic</option>
+  <option value="objective">Objective</option>
+  <option value="spec">Spec</option>
+  <option value="micro">Micro</option>
+</Select>
 ```
 ```
-→ これらの詳細は各層のSpecで扱うべき
+
+**理由:** これはプレゼンテーション層Specで扱うべき実装コード。Objectiveでは「レベル選択ドロップダウン」「7種類から選択可能」と概念で記述すべき。
 
 
 ## Spec
