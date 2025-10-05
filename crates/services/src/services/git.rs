@@ -44,7 +44,7 @@ pub struct GitService {}
 
 // Max inline diff size for UI (in bytes). Files larger than this will have
 // their contents omitted from the diff stream to avoid UI crashes.
-const MAX_INLINE_DIFF_BYTES: usize = 150 * 1024; // ~150KB
+const MAX_INLINE_DIFF_BYTES: usize = 2 * 1024 * 1024; // ~2MB
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -87,6 +87,36 @@ impl std::fmt::Display for Commit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct WorktreeResetOptions {
+    pub perform_reset: bool,
+    pub force_when_dirty: bool,
+    pub is_dirty: bool,
+    pub log_skip_when_dirty: bool,
+}
+
+impl WorktreeResetOptions {
+    pub fn new(
+        perform_reset: bool,
+        force_when_dirty: bool,
+        is_dirty: bool,
+        log_skip_when_dirty: bool,
+    ) -> Self {
+        Self {
+            perform_reset,
+            force_when_dirty,
+            is_dirty,
+            log_skip_when_dirty,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct WorktreeResetOutcome {
+    pub needed: bool,
+    pub applied: bool,
 }
 
 /// Target for diff generation
@@ -1074,6 +1104,47 @@ impl GitService {
             .map_err(|e| GitServiceError::InvalidRepository(format!("git status failed: {e}")))
     }
 
+    /// Evaluate whether any action is needed to reset to `target_commit_oid` and
+    /// optionally perform the actions.
+    pub fn reconcile_worktree_to_commit(
+        &self,
+        worktree_path: &Path,
+        target_commit_oid: &str,
+        options: WorktreeResetOptions,
+    ) -> WorktreeResetOutcome {
+        let WorktreeResetOptions {
+            perform_reset,
+            force_when_dirty,
+            is_dirty,
+            log_skip_when_dirty,
+        } = options;
+
+        let head_oid = self.get_head_info(worktree_path).ok().map(|h| h.oid);
+        let mut outcome = WorktreeResetOutcome::default();
+
+        if head_oid.as_deref() != Some(target_commit_oid) || is_dirty {
+            outcome.needed = true;
+
+            if perform_reset {
+                if is_dirty && !force_when_dirty {
+                    if log_skip_when_dirty {
+                        tracing::warn!("Worktree dirty; skipping reset as not forced");
+                    }
+                } else if let Err(e) = self.reset_worktree_to_commit(
+                    worktree_path,
+                    target_commit_oid,
+                    force_when_dirty,
+                ) {
+                    tracing::error!("Failed to reset worktree: {}", e);
+                } else {
+                    outcome.applied = true;
+                }
+            }
+        }
+
+        outcome
+    }
+
     /// Reset the given worktree to the specified commit SHA.
     /// If `force` is false and the worktree is dirty, returns WorktreeDirty error.
     pub fn reset_worktree_to_commit(
@@ -1311,8 +1382,9 @@ impl GitService {
         &self,
         repo_path: &Path,
         worktree_path: &Path,
-        new_base_branch: Option<&str>,
+        new_base_branch: &str,
         old_base_branch: &str,
+        task_branch: &str,
         github_token: Option<String>,
     ) -> Result<String, GitServiceError> {
         let worktree_repo = Repository::open(worktree_path)?;
@@ -1331,32 +1403,17 @@ impl GitService {
         }
 
         // Get the target base branch reference
-        let new_base_branch_name = match new_base_branch {
-            Some(branch) => branch.to_string(),
-            None => main_repo
-                .head()
-                .ok()
-                .and_then(|head| head.shorthand().map(|s| s.to_string()))
-                .unwrap_or_else(|| "main".to_string()),
-        };
-        let nbr = Self::find_branch(&main_repo, &new_base_branch_name)?.into_reference();
+        let nbr = Self::find_branch(&main_repo, new_base_branch)?.into_reference();
         // If the target base is remote, update it first so CLI sees latest
         if nbr.is_remote() {
             let github_token = github_token.ok_or(GitServiceError::TokenUnavailable)?;
-            let remote = self.get_remote_from_branch_ref(&main_repo, &nbr)?;
-            // First, fetch the latest changes from remote
-            self.fetch_branch_from_remote(
-                &main_repo,
-                &github_token,
-                &remote,
-                &new_base_branch_name,
-            )?;
+            self.fetch_branch_from_remote(&main_repo, &github_token, &nbr)?;
         }
 
         // Ensure identity for any commits produced by rebase
         self.ensure_cli_commit_identity(worktree_path)?;
         // Use git CLI rebase to carry out the operation safely
-        match git.rebase_onto(worktree_path, &new_base_branch_name, old_base_branch) {
+        match git.rebase_onto(worktree_path, new_base_branch, old_base_branch, task_branch) {
             Ok(()) => {}
             Err(GitCliError::RebaseInProgress) => {
                 return Err(GitServiceError::RebaseInProgress);
@@ -1394,7 +1451,7 @@ impl GitService {
                         }
                     };
                     let msg = format!(
-                        "Rebase encountered merge conflicts while rebasing '{attempt_branch}' onto '{new_base_branch_name}'.{files_part} Resolve conflicts and then continue or abort."
+                        "Rebase encountered merge conflicts while rebasing '{attempt_branch}' onto '{new_base_branch}'.{files_part} Resolve conflicts and then continue or abort."
                     );
                     return Err(GitServiceError::MergeConflicts(msg));
                 }
@@ -1431,6 +1488,21 @@ impl GitService {
                     Err(_) => Err(GitServiceError::BranchNotFound(branch_name.to_string())),
                 }
             }
+        }
+    }
+
+    pub fn check_branch_exists(
+        &self,
+        repo_path: &Path,
+        branch_name: &str,
+    ) -> Result<bool, GitServiceError> {
+        let repo = self.open_repo(repo_path)?;
+        match repo.find_branch(branch_name, BranchType::Local) {
+            Ok(_) => Ok(true),
+            Err(_) => match repo.find_branch(branch_name, BranchType::Remote) {
+                Ok(_) => Ok(true),
+                Err(_) => Ok(false),
+            },
         }
     }
 
@@ -1732,7 +1804,6 @@ impl GitService {
             .ok_or_else(|| GitServiceError::InvalidRepository("Remote has no URL".to_string()))?;
 
         let https_url = self.convert_to_https_url(remote_url);
-        // Create temporary HTTPS remote
         let git_cli = GitCli::new();
         if let Err(e) =
             git_cli.fetch_with_token_and_refspec(repo.path(), &https_url, refspec, github_token)
@@ -1748,13 +1819,18 @@ impl GitService {
         &self,
         repo: &Repository,
         github_token: &str,
-        remote: &Remote,
-        branch_name: &str,
+        branch: &Reference,
     ) -> Result<(), GitServiceError> {
+        let remote = self.get_remote_from_branch_ref(repo, branch)?;
         let default_remote_name = self.default_remote_name(repo);
         let remote_name = remote.name().unwrap_or(&default_remote_name);
-        let refspec = format!("+refs/heads/{branch_name}:refs/remotes/{remote_name}/{branch_name}");
-        self.fetch_from_remote(repo, github_token, remote, &refspec)
+        let dest_ref = branch
+            .name()
+            .ok_or_else(|| GitServiceError::InvalidRepository("Invalid branch ref".into()))?;
+        let remote_prefix = format!("refs/remotes/{remote_name}/");
+        let src_ref = dest_ref.replacen(&remote_prefix, "refs/heads/", 1);
+        let refspec = format!("+{src_ref}:{dest_ref}");
+        self.fetch_from_remote(repo, github_token, &remote, &refspec)
     }
 
     /// Fetch from remote repository using GitHub token authentication
@@ -1777,6 +1853,8 @@ impl GitService {
         target_path: &Path,
         token: Option<&str>,
     ) -> Result<Repository, GitServiceError> {
+        use git2::{Cred, FetchOptions, RemoteCallbacks};
+
         if let Some(parent) = target_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -1791,11 +1869,12 @@ impl GitService {
             // Fallback to SSH agent and key file authentication
             callbacks.credentials(|_url, username_from_url, _| {
                 // Try SSH agent first
-                if let Some(username) = username_from_url {
-                    if let Ok(cred) = Cred::ssh_key_from_agent(username) {
-                        return Ok(cred);
-                    }
+                if let Some(username) = username_from_url
+                    && let Ok(cred) = Cred::ssh_key_from_agent(username)
+                {
+                    return Ok(cred);
                 }
+
                 // Fallback to key file (~/.ssh/id_rsa)
                 let home = dirs::home_dir()
                     .ok_or_else(|| git2::Error::from_str("Could not find home directory"))?;

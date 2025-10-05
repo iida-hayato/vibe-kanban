@@ -1,7 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Globe2, Settings2, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ImageUploadSection } from '@/components/ui/ImageUploadSection';
+import {
+  ImageUploadSection,
+  type ImageUploadSectionHandle,
+} from '@/components/ui/ImageUploadSection';
 import {
   Dialog,
   DialogContent,
@@ -82,6 +85,7 @@ export const TaskFormDialog = NiceModal.create<TaskFormDialogProps>(
       useState<ExecutorProfileId | null>(null);
     const [quickstartExpanded, setQuickstartExpanded] =
       useState<boolean>(false);
+    const imageUploadRef = useRef<ImageUploadSectionHandle>(null);
 
     const isEditMode = Boolean(task);
 
@@ -219,7 +223,7 @@ export const TaskFormDialog = NiceModal.create<TaskFormDialogProps>(
         attemptsApi
           .get(parentTaskAttemptId)
           .then((attempt) => {
-            const parentBranch = attempt.branch || attempt.base_branch;
+            const parentBranch = attempt.branch || attempt.target_branch;
             if (parentBranch && branches.some((b) => b.name === parentBranch)) {
               setSelectedBranch(parentBranch);
             }
@@ -290,6 +294,11 @@ export const TaskFormDialog = NiceModal.create<TaskFormDialogProps>(
       );
     }, []);
 
+    const handlePasteImages = useCallback((files: File[]) => {
+      if (files.length === 0) return;
+      void imageUploadRef.current?.addFiles(files);
+    }, []);
+
     const handleSubmit = useCallback(async () => {
       if (!title.trim() || !projectId) return;
 
@@ -315,7 +324,7 @@ export const TaskFormDialog = NiceModal.create<TaskFormDialogProps>(
               taskId: task.id,
               data: {
                 title,
-                description: description || null,
+                description: description,
                 status,
                 parent_task_attempt: parentTaskAttemptId || null,
                 image_ids: imageIds || null,
@@ -332,7 +341,7 @@ export const TaskFormDialog = NiceModal.create<TaskFormDialogProps>(
             {
               project_id: projectId,
               title,
-              description: description || null,
+              description: description,
               parent_task_attempt: parentTaskAttemptId || null,
               image_ids: imageIds || null,
             },
@@ -386,7 +395,7 @@ export const TaskFormDialog = NiceModal.create<TaskFormDialogProps>(
               task: {
                 project_id: projectId,
                 title,
-                description: description || null,
+                description: description,
                 parent_task_attempt: parentTaskAttemptId || null,
                 image_ids: imageIds || null,
               },
@@ -492,10 +501,12 @@ export const TaskFormDialog = NiceModal.create<TaskFormDialogProps>(
                     isEditMode ? handleSubmit : handleCreateAndStart
                   }
                   onCommandShiftEnter={handleSubmit}
+                  onPasteFiles={handlePasteImages}
                 />
               </div>
 
               <ImageUploadSection
+                ref={imageUploadRef}
                 images={images}
                 onImagesChange={handleImagesChange}
                 onUpload={imagesApi.upload}

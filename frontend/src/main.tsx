@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import './styles/index.css';
 import { ClickToComponent } from 'click-to-react-component';
+import { VibeKanbanWebCompanion } from 'vibe-kanban-web-companion';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as Sentry from '@sentry/react';
 import NiceModal from '@ebay/nice-modal-react';
@@ -23,6 +24,7 @@ import {
   DeleteTaskConfirmationDialog,
   FolderPickerDialog,
   TaskTemplateEditDialog,
+  ChangeTargetBranchDialog,
   RebaseDialog,
   CreateConfigurationDialog,
   DeleteConfigurationDialog,
@@ -45,6 +47,7 @@ NiceModal.register('task-form', TaskFormDialog);
 NiceModal.register('editor-selection', EditorSelectionDialog);
 NiceModal.register('folder-picker', FolderPickerDialog);
 NiceModal.register('task-template-edit', TaskTemplateEditDialog);
+NiceModal.register('change-target-branch-dialog', ChangeTargetBranchDialog);
 NiceModal.register('rebase-dialog', RebaseDialog);
 NiceModal.register('create-configuration', CreateConfigurationDialog);
 NiceModal.register('delete-configuration', DeleteConfigurationDialog);
@@ -91,6 +94,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <Sentry.ErrorBoundary fallback={<p>An error has occurred</p>} showDialog>
         <ClickToComponent />
+        <VibeKanbanWebCompanion />
         <App />
         {/* <ReactQueryDevtools initialIsOpen={false} /> */}
       </Sentry.ErrorBoundary>

@@ -20,7 +20,7 @@ use db::models::{
 use deployment::Deployment;
 use executors::profile::ExecutorProfileId;
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use services::services::container::{
     ContainerService, WorktreeCleanupData, cleanup_worktrees_direct,
 };
@@ -31,7 +31,7 @@ use uuid::Uuid;
 
 use crate::{DeploymentImpl, error::ApiError, middleware::load_task_middleware};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TaskQuery {
     pub project_id: Uuid,
 }
@@ -163,13 +163,19 @@ pub async fn create_task_and_start(
             }),
         )
         .await;
+    let attempt_id = Uuid::new_v4();
+    let git_branch_name = deployment
+        .container()
+        .git_branch_from_task_attempt(&attempt_id, &task.title);
 
     let task_attempt = TaskAttempt::create(
         &deployment.db().pool,
         &CreateTaskAttempt {
             executor: payload.executor_profile_id.executor,
             base_branch: payload.base_branch,
+            branch: git_branch_name,
         },
+        attempt_id,
         task.id,
     )
     .await?;
@@ -210,7 +216,11 @@ pub async fn update_task(
 ) -> Result<ResponseJson<ApiResponse<Task>>, ApiError> {
     // Use existing values if not provided in update
     let title = payload.title.unwrap_or(existing_task.title);
-    let description = payload.description.or(existing_task.description);
+    let description = match payload.description {
+        Some(s) if s.trim().is_empty() => None, // Empty string = clear description
+        Some(s) => Some(s),                     // Non-empty string = update description
+        None => existing_task.description,      // Field omitted = keep existing
+    };
     let status = payload.status.unwrap_or(existing_task.status);
     let parent_task_attempt = payload
         .parent_task_attempt

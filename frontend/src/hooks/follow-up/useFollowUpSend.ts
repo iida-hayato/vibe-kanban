@@ -5,11 +5,14 @@ import type { ImageResponse } from 'shared/types';
 type Args = {
   attemptId?: string;
   message: string;
+  conflictMarkdown: string | null;
   reviewMarkdown: string;
+  clickedMarkdown?: string;
   selectedVariant: string | null;
   images: ImageResponse[];
   newlyUploadedImageIds: string[];
   clearComments: () => void;
+  clearClickedElements?: () => void;
   jumpToLogsTab: () => void;
   onAfterSendCleanup: () => void;
   setMessage: (v: string) => void;
@@ -18,11 +21,14 @@ type Args = {
 export function useFollowUpSend({
   attemptId,
   message,
+  conflictMarkdown,
   reviewMarkdown,
+  clickedMarkdown,
   selectedVariant,
   images,
   newlyUploadedImageIds,
   clearComments,
+  clearClickedElements,
   jumpToLogsTab,
   onAfterSendCleanup,
   setMessage,
@@ -33,7 +39,12 @@ export function useFollowUpSend({
   const onSendFollowUp = useCallback(async () => {
     if (!attemptId) return;
     const extraMessage = message.trim();
-    const finalPrompt = [reviewMarkdown, extraMessage]
+    const finalPrompt = [
+      conflictMarkdown,
+      clickedMarkdown?.trim(),
+      reviewMarkdown?.trim(),
+      extraMessage,
+    ]
       .filter(Boolean)
       .join('\n\n');
     if (!finalPrompt) return;
@@ -50,9 +61,13 @@ export function useFollowUpSend({
         prompt: finalPrompt,
         variant: selectedVariant,
         image_ids,
-      });
+        retry_process_id: null,
+        force_when_dirty: null,
+        perform_git_reset: null,
+      } as any);
       setMessage('');
       clearComments();
+      clearClickedElements?.();
       onAfterSendCleanup();
       jumpToLogsTab();
     } catch (error: unknown) {
@@ -66,11 +81,14 @@ export function useFollowUpSend({
   }, [
     attemptId,
     message,
+    conflictMarkdown,
     reviewMarkdown,
+    clickedMarkdown,
     newlyUploadedImageIds,
     images,
     selectedVariant,
     clearComments,
+    clearClickedElements,
     jumpToLogsTab,
     onAfterSendCleanup,
     setMessage,

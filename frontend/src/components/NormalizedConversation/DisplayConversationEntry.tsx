@@ -30,6 +30,7 @@ import RawLogText from '../common/RawLogText';
 import UserMessage from './UserMessage';
 import PendingApprovalEntry from './PendingApprovalEntry';
 import { cn } from '@/lib/utils';
+import { useRetryUi } from '@/contexts/RetryUiContext';
 
 type Props = {
   entry: NormalizedEntry | ProcessStartPayload;
@@ -400,12 +401,7 @@ const PlanPresentationCard: React.FC<{
         </button>
 
         {expanded && (
-          <div
-            className={cn(
-              'px-3 py-2 max-h-[65vh] overflow-y-auto overscroll-contain',
-              tone.contentBg
-            )}
-          >
+          <div className={cn('px-3 py-2', tone.contentBg)}>
             <div className={cn('text-sm', tone.contentText)}>
               <MarkdownRenderer
                 content={plan}
@@ -612,14 +608,19 @@ function DisplayConversationEntry({
     entry: NormalizedEntry | ProcessStartPayload
   ): entry is ProcessStartPayload => 'processId' in entry;
 
+  const { isProcessGreyed } = useRetryUi();
+  const greyed = isProcessGreyed(executionProcessId);
+
   if (isProcessStart(entry)) {
     const toolAction: any = entry.action ?? null;
     return (
-      <ToolCallCard
-        action={toolAction}
-        expansionKey={expansionKey}
-        content={toolAction?.message ?? toolAction?.summary ?? undefined}
-      />
+      <div className={greyed ? 'opacity-50 pointer-events-none' : undefined}>
+        <ToolCallCard
+          action={toolAction}
+          expansionKey={expansionKey}
+          content={toolAction?.message ?? toolAction?.summary ?? undefined}
+        />
+      </div>
     );
   }
 
@@ -644,7 +645,6 @@ function DisplayConversationEntry({
   }
   const renderToolUse = () => {
     if (!isNormalizedEntry(entry)) return null;
-
     if (entryType.type !== 'tool_use') return null;
     const toolEntry = entryType;
 
@@ -698,7 +698,13 @@ function DisplayConversationEntry({
       );
     })();
 
-    const content = <div className="px-4 py-2 text-sm space-y-3">{body}</div>;
+    const content = (
+      <div
+        className={`px-4 py-2 text-sm space-y-3 ${greyed ? 'opacity-50 pointer-events-none' : ''}`}
+      >
+        {body}
+      </div>
+    );
 
     if (isPendingApprovalStatus(status)) {
       return (
@@ -720,7 +726,9 @@ function DisplayConversationEntry({
 
   if (isSystem || isError) {
     return (
-      <div className="px-4 py-2 text-sm">
+      <div
+        className={`px-4 py-2 text-sm ${greyed ? 'opacity-50 pointer-events-none' : ''}`}
+      >
         <CollapsibleEntry
           content={isNormalizedEntry(entry) ? entry.content : ''}
           markdown={shouldRenderMarkdown(entryType)}
